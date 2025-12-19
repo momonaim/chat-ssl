@@ -3,7 +3,7 @@ CC = gcc -std=c99
 CFLAGS = -Wall -g
 LDFLAGS = -lpthread -lsqlite3 -lssl -lcrypto
 
-all: server client test
+all: server client
 
 server: server_ssl.c
 	$(CC) $(CFLAGS) -o server server_ssl.c $(LDFLAGS)
