@@ -1,0 +1,50 @@
+DOCUMENTATION UTILISATEUR
+=========================
+
+COMMANDES DISPONIBLES:
+----------------------
+/help                 - Afficher cette aide
+/join [groupe]        - Rejoindre un groupe
+/private [user] [msg] - Envoyer un message privé
+/users                - Lister les utilisateurs connectés
+/quit                 - Quitter l'application
+
+EXEMPLES D'UTILISATION:
+-----------------------
+1. Lancement du serveur:
+   $ ./server
+
+2. Lancement d'un client:
+   $ ./client 127.0.0.1 8888
+
+3. Authentification:
+   Entrez votre nom d'utilisateur: alice
+   Entrez votre mot de passe: secret
+
+4. Envoyer un message à tous:
+   Bonjour tout le monde!
+
+5. Message privé:
+   /private bob Salut Bob!
+
+6. Voir les utilisateurs:
+   /users
+
+SÉCURITÉ:
+---------
+- Toutes les communications sont chiffrées avec SSL/TLS
+- Les mots de passe sont stockés de manière sécurisée
+- Chaque session est authentifiée
+- Protection contre les attaques par rejeu
+
+CONFIGURATION RÉSEAU:
+---------------------
+1. Modifier l'adresse IP dans server_ssl.c si nécessaire
+2. Ouvrir le port 8888 dans le firewall
+3. Pour le déploiement en production, utiliser des certificats valides
+
+DÉPANNAGE:
+----------
+- Vérifier que les certificats SSL sont présents
+- S'assurer que le port 8888 n'est pas utilisé
+- Vérifier les logs du serveur pour les erreurs
