@@ -40,6 +40,12 @@ void init_ssl()
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
+    // Disable insecure SSL/TLS versions
+    SSL_CTX_set_options(ssl_context,
+                        SSL_OP_NO_SSLv2 |
+                            SSL_OP_NO_SSLv3 |
+                            SSL_OP_NO_TLSv1 |
+                            SSL_OP_NO_TLSv1_1);
 }
 
 int main(int argc, char *argv[])
@@ -68,7 +74,12 @@ int main(int argc, char *argv[])
     // Configuration du serveur
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(atoi(argv[2]));
-    inet_pton(AF_INET, argv[1], &server_addr.sin_addr);
+    if (inet_pton(AF_INET, argv[1], &server_addr.sin_addr) <= 0)
+    {
+        fprintf(stderr, "Invalid server IP address.\n");
+        close(sock);
+        return 1;
+    }
 
     // Connexion au serveur
     if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
@@ -79,28 +90,57 @@ int main(int argc, char *argv[])
 
     // Configuration SSL
     ssl = SSL_new(ssl_context);
+    if (!ssl)
+    {
+        fprintf(stderr, "SSL_new failed.\n");
+        close(sock);
+        SSL_CTX_free(ssl_context);
+        return 1;
+    }
     SSL_set_fd(ssl, sock);
 
     if (SSL_connect(ssl) <= 0)
     {
         ERR_print_errors_fp(stderr);
+        SSL_free(ssl);
+        SSL_CTX_free(ssl_context);
+        close(sock);
         return 1;
     }
 
     printf("Connexion SSL établie avec le serveur\n");
 
     // Thread de réception des messages
-    pthread_create(&recv_thread, NULL, receive_messages, NULL);
+    if (pthread_create(&recv_thread, NULL, receive_messages, NULL) != 0)
+    {
+        fprintf(stderr, "pthread_create failed.\n");
+        SSL_free(ssl);
+        SSL_CTX_free(ssl_context);
+        close(sock);
+        return 1;
+    }
+    pthread_detach(recv_thread);
 
     // Boucle d'envoi des messages
     while (1)
     {
-        fgets(buffer, BUFFER_SIZE, stdin);
+        if (!fgets(buffer, BUFFER_SIZE - 2, stdin)) // leave space for newline and null
+            break;
         buffer[strcspn(buffer, "\n")] = 0;
 
         if (strlen(buffer) > 0)
         {
-            strcat(buffer, "\n");
+            size_t len = strlen(buffer);
+            if (len < BUFFER_SIZE - 2)
+            {
+                buffer[len] = '\n';
+                buffer[len + 1] = '\0';
+            }
+            else
+            {
+                buffer[BUFFER_SIZE - 2] = '\n';
+                buffer[BUFFER_SIZE - 1] = '\0';
+            }
             SSL_write(ssl, buffer, strlen(buffer));
 
             if (strcmp(buffer, "/quit\n") == 0)
@@ -111,7 +151,6 @@ int main(int argc, char *argv[])
     }
 
     // Nettoyage
-    pthread_cancel(recv_thread);
     SSL_free(ssl);
     SSL_CTX_free(ssl_context);
     close(sock);

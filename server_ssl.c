@@ -21,6 +21,7 @@ typedef struct
     char ip_address[INET_ADDRSTRLEN];
     int port;
     int is_authenticated;
+    char group[50]; // Added for group chat
 } ClientInfo;
 
 typedef struct
@@ -51,6 +52,13 @@ SSL_CTX *init_ssl_context()
         ERR_print_errors_fp(stderr);
         return NULL;
     }
+
+    // Disable insecure SSL/TLS versions
+    SSL_CTX_set_options(ctx,
+                        SSL_OP_NO_SSLv2 |
+                            SSL_OP_NO_SSLv3 |
+                            SSL_OP_NO_TLSv1 |
+                            SSL_OP_NO_TLSv1_1);
 
     if (SSL_CTX_use_certificate_file(ctx, "server.crt", SSL_FILETYPE_PEM) <= 0)
     {
@@ -90,17 +98,22 @@ int init_database()
     FILE *sql_file = fopen("users.sql", "r");
     if (sql_file)
     {
-        char sql_buffer[4096];
-        char *err_msg = 0;
-
-        while (fgets(sql_buffer, sizeof(sql_buffer), sql_file))
+        fseek(sql_file, 0, SEEK_END);
+        long file_size = ftell(sql_file);
+        rewind(sql_file);
+        char *sql_script = malloc(file_size + 1);
+        if (sql_script)
         {
-            rc = sqlite3_exec(db, sql_buffer, 0, 0, &err_msg);
+            size_t read_size = fread(sql_script, 1, file_size, sql_file);
+            sql_script[read_size] = '\0';
+            char *err_msg = 0;
+            rc = sqlite3_exec(db, sql_script, 0, 0, &err_msg);
             if (rc != SQLITE_OK)
             {
                 fprintf(stderr, "SQL error: %s\n", err_msg);
                 sqlite3_free(err_msg);
             }
+            free(sql_script);
         }
         fclose(sql_file);
     }
@@ -114,6 +127,7 @@ int authenticate_user(char *username, char *password)
     char sql[512];
     sqlite3_stmt *stmt;
 
+    // WARNING: In production, use a secure password hash (e.g., bcrypt) instead of plain text!
     sprintf(sql, "SELECT id, password_hash FROM users WHERE username = ?");
 
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK)
@@ -124,7 +138,7 @@ int authenticate_user(char *username, char *password)
         {
             // Vérifier le mot de passe (simplifié - utiliser bcrypt en production)
             const char *stored_hash = (const char *)sqlite3_column_text(stmt, 1);
-            // Ici, vous devriez utiliser une fonction de hachage sécurisée
+            // TODO: Use a secure hash comparison in production
             if (strcmp(password, stored_hash) == 0)
             {
                 int user_id = sqlite3_column_int(stmt, 0);
@@ -178,24 +192,81 @@ void handle_command(ClientInfo *client, char *command)
 {
     char buffer[BUFFER_SIZE];
     char *token = strtok(command, " ");
+    if (!token)
+        return;
 
     if (strcmp(token, "/join") == 0)
     {
         token = strtok(NULL, " ");
-        sprintf(buffer, "SERVER: Vous avez rejoint le groupe %s\n", token);
+        if (!token)
+        {
+            snprintf(buffer, sizeof(buffer), "SERVER: Groupe non spécifié\n");
+        }
+        else
+        {
+            strncpy(client->group, token, sizeof(client->group) - 1);
+            client->group[sizeof(client->group) - 1] = '\0';
+            snprintf(buffer, sizeof(buffer), "SERVER: Vous avez rejoint le groupe %s\n", client->group);
+        }
         send_to_client(client->ssl, buffer);
+    }
+    else if (strcmp(token, "/quitgroup") == 0)
+    {
+        if (client->group[0] == '\0')
+        {
+            snprintf(buffer, sizeof(buffer), "SERVER: Vous n'êtes dans aucun groupe.\n");
+        }
+        else
+        {
+            client->group[0] = '\0';
+            snprintf(buffer, sizeof(buffer), "SERVER: Vous avez quitté le groupe.\n");
+        }
+        send_to_client(client->ssl, buffer);
+    }
+    else if (strcmp(token, "/group") == 0)
+    {
+        char *message = strtok(NULL, "");
+        if (!client->group[0])
+        {
+            snprintf(buffer, sizeof(buffer), "SERVER: Vous n'avez pas rejoint de groupe. Utilisez /join [groupe]\n");
+            send_to_client(client->ssl, buffer);
+            return;
+        }
+        if (!message || strlen(message) == 0)
+        {
+            snprintf(buffer, sizeof(buffer), "SERVER: Message de groupe vide. Usage: /group [message]\n");
+            send_to_client(client->ssl, buffer);
+            return;
+        }
+        char group_msg[BUFFER_SIZE + 100];
+        snprintf(group_msg, sizeof(group_msg), "[GROUPE %s] %s: %s\n", client->group, client->username, message);
+        // Broadcast only to group members
+        pthread_mutex_lock(&clients_mutex);
+        for (int i = 0; i < MAX_CLIENTS; i++)
+        {
+            if (clients[i] && clients[i]->is_authenticated && strcmp(clients[i]->group, client->group) == 0)
+            {
+                send_to_client(clients[i]->ssl, group_msg);
+            }
+        }
+        pthread_mutex_unlock(&clients_mutex);
     }
     else if (strcmp(token, "/private") == 0)
     {
         char *target_user = strtok(NULL, " ");
         char *message = strtok(NULL, "\n");
-
-        sprintf(buffer, "PRIVATE from %s: %s\n", client->username, message);
+        if (!target_user || !message)
+        {
+            snprintf(buffer, sizeof(buffer), "SERVER: Usage: /private [user] [message]\n");
+            send_to_client(client->ssl, buffer);
+            return;
+        }
+        snprintf(buffer, sizeof(buffer), "PRIVATE from %s: %s\n", client->username, message);
 
         pthread_mutex_lock(&clients_mutex);
         for (int i = 0; i < MAX_CLIENTS; i++)
         {
-            if (clients[i] && strcmp(clients[i]->username, target_user) == 0)
+            if (clients[i] && clients[i]->username[0] != '\0' && strcmp(clients[i]->username, target_user) == 0)
             {
                 send_to_client(clients[i]->ssl, buffer);
                 break;
@@ -205,27 +276,87 @@ void handle_command(ClientInfo *client, char *command)
     }
     else if (strcmp(token, "/users") == 0)
     {
-        sprintf(buffer, "=== Utilisateurs connectés ===\n");
+        size_t pos = 0;
+        int n;
+        n = snprintf(buffer + pos, sizeof(buffer) - pos, "=== Utilisateurs connectés ===\n");
+        if (n < 0 || (size_t)n >= sizeof(buffer) - pos)
+            n = (int)(sizeof(buffer) - pos - 1);
+        pos += n;
         pthread_mutex_lock(&clients_mutex);
         for (int i = 0; i < MAX_CLIENTS; i++)
         {
-            if (clients[i] && clients[i]->is_authenticated)
+            if (clients[i] && clients[i]->is_authenticated && clients[i]->username[0] != '\0')
             {
-                sprintf(buffer + strlen(buffer), "- %s (%s:%d)\n",
-                        clients[i]->username, clients[i]->ip_address, clients[i]->port);
+                n = snprintf(buffer + pos, sizeof(buffer) - pos, "- %s (%s:%d)\n",
+                             clients[i]->username, clients[i]->ip_address, clients[i]->port);
+                if (n < 0 || (size_t)n >= sizeof(buffer) - pos)
+                {
+                    // Buffer full, stop adding more users
+                    break;
+                }
+                pos += n;
             }
         }
         pthread_mutex_unlock(&clients_mutex);
+        buffer[sizeof(buffer) - 1] = '\0';
+        send_to_client(client->ssl, buffer);
+    }
+    else if (strcmp(token, "/groups") == 0)
+    {
+        char groups[MAX_CLIENTS][50];
+        int group_count = 0;
+        size_t pos = 0;
+        int n;
+        n = snprintf(buffer + pos, sizeof(buffer) - pos, "=== Groupes actifs ===\n");
+        if (n < 0 || (size_t)n >= sizeof(buffer) - pos)
+            n = (int)(sizeof(buffer) - pos - 1);
+        pos += n;
+        pthread_mutex_lock(&clients_mutex);
+        for (int i = 0; i < MAX_CLIENTS; i++)
+        {
+            if (clients[i] && clients[i]->is_authenticated && clients[i]->group[0] != '\0')
+            {
+                int exists = 0;
+                for (int j = 0; j < group_count; j++)
+                {
+                    if (strcmp(groups[j], clients[i]->group) == 0)
+                    {
+                        exists = 1;
+                        break;
+                    }
+                }
+                if (!exists && group_count < MAX_CLIENTS)
+                {
+                    strncpy(groups[group_count], clients[i]->group, sizeof(groups[group_count]) - 1);
+                    groups[group_count][sizeof(groups[group_count]) - 1] = '\0';
+                    group_count++;
+                }
+            }
+        }
+        pthread_mutex_unlock(&clients_mutex);
+        for (int i = 0; i < group_count; i++)
+        {
+            n = snprintf(buffer + pos, sizeof(buffer) - pos, "- %s\n", groups[i]);
+            if (n < 0 || (size_t)n >= sizeof(buffer) - pos)
+            {
+                break;
+            }
+            pos += n;
+        }
+        buffer[sizeof(buffer) - 1] = '\0';
         send_to_client(client->ssl, buffer);
     }
     else if (strcmp(token, "/help") == 0)
     {
-        sprintf(buffer, "=== Commandes disponibles ===\n"
-                        "/join [groupe] - Rejoindre un groupe\n"
-                        "/private [user] [message] - Message privé\n"
-                        "/users - Liste des utilisateurs\n"
-                        "/help - Afficher l'aide\n"
-                        "/quit - Quitter\n");
+        snprintf(buffer, sizeof(buffer), "=== Commandes disponibles ===\n"
+                                         "/join [groupe] - Rejoindre un groupe\n"
+                                         "/quitgroup - Quitter le groupe\n"
+                                         "/group [message] - Envoyer un message au groupe\n"
+                                         "/groups - Liste des groupes actifs\n"
+                                         "/private [user] [message] - Message privé\n"
+                                         "/users - Liste des utilisateurs\n"
+                                         "/help - Afficher l'aide\n"
+                                         "/quit - Quitter\n");
         send_to_client(client->ssl, buffer);
     }
 }
@@ -241,15 +372,31 @@ void *handle_client(void *arg)
     sprintf(buffer, "Entrez votre nom d'utilisateur: ");
     send_to_client(client->ssl, buffer);
 
-    bytes_received = SSL_read(client->ssl, buffer, BUFFER_SIZE);
+    bytes_received = SSL_read(client->ssl, buffer, BUFFER_SIZE - 1);
+    if (bytes_received <= 0)
+    {
+        close(client->socket);
+        SSL_free(client->ssl);
+        free(client);
+        return NULL;
+    }
     buffer[bytes_received] = '\0';
     buffer[strcspn(buffer, "\n")] = 0;
-    strcpy(client->username, buffer);
+    strncpy(client->username, buffer, sizeof(client->username) - 1);
+    client->username[sizeof(client->username) - 1] = '\0';
+    client->group[0] = '\0'; // No group by default
 
     sprintf(buffer, "Entrez votre mot de passe: ");
     send_to_client(client->ssl, buffer);
 
-    bytes_received = SSL_read(client->ssl, buffer, BUFFER_SIZE);
+    bytes_received = SSL_read(client->ssl, buffer, BUFFER_SIZE - 1);
+    if (bytes_received <= 0)
+    {
+        close(client->socket);
+        SSL_free(client->ssl);
+        free(client);
+        return NULL;
+    }
     buffer[bytes_received] = '\0';
     buffer[strcspn(buffer, "\n")] = 0;
 
@@ -275,7 +422,7 @@ void *handle_client(void *arg)
     }
 
     // Boucle principale de traitement des messages
-    while ((bytes_received = SSL_read(client->ssl, buffer, BUFFER_SIZE)) > 0)
+    while ((bytes_received = SSL_read(client->ssl, buffer, BUFFER_SIZE - 1)) > 0)
     {
         buffer[bytes_received] = '\0';
         buffer[strcspn(buffer, "\n")] = 0;
@@ -289,10 +436,26 @@ void *handle_client(void *arg)
         }
         else
         {
-            // Message normal - diffusion à tous
+            // Message normal - diffusion à tous si pas dans un groupe
             char broadcast_msg[BUFFER_SIZE + 100];
-            sprintf(broadcast_msg, "%s: %s\n", client->username, buffer);
-            broadcast_message(broadcast_msg, -1);
+            if (client->group[0] == '\0')
+            {
+                snprintf(broadcast_msg, sizeof(broadcast_msg), "%s: %s\n", client->username, buffer);
+                broadcast_message(broadcast_msg, -1);
+            }
+            else
+            {
+                snprintf(broadcast_msg, sizeof(broadcast_msg), "[GROUPE %s] %s: %s\n", client->group, client->username, buffer);
+                pthread_mutex_lock(&clients_mutex);
+                for (int i = 0; i < MAX_CLIENTS; i++)
+                {
+                    if (clients[i] && clients[i]->is_authenticated && strcmp(clients[i]->group, client->group) == 0)
+                    {
+                        send_to_client(clients[i]->ssl, broadcast_msg);
+                    }
+                }
+                pthread_mutex_unlock(&clients_mutex);
+            }
         }
 
         if (strcmp(buffer, "/quit") == 0)
@@ -382,9 +545,23 @@ int main()
             continue;
         }
 
+        fprintf(stderr, "[DEBUG] Accepted new connection.\n");
+
         // Création du contexte SSL pour ce client
         SSL *ssl = SSL_new(ssl_context);
-        SSL_set_fd(ssl, client_fd);
+        if (!ssl)
+        {
+            fprintf(stderr, "[ERROR] SSL_new failed.\n");
+            close(client_fd);
+            continue;
+        }
+        if (SSL_set_fd(ssl, client_fd) == 0)
+        {
+            fprintf(stderr, "[ERROR] SSL_set_fd failed.\n");
+            SSL_free(ssl);
+            close(client_fd);
+            continue;
+        }
 
         if (SSL_accept(ssl) <= 0)
         {
@@ -394,32 +571,92 @@ int main()
             continue;
         }
 
+        fprintf(stderr, "[DEBUG] SSL handshake successful.\n");
+
         // Création de la structure client
         ClientInfo *client = malloc(sizeof(ClientInfo));
+        if (!client)
+        {
+            fprintf(stderr, "Erreur d'allocation mémoire pour ClientInfo\n");
+            close(client_fd);
+            SSL_free(ssl);
+            continue;
+        }
+        memset(client, 0, sizeof(ClientInfo));
         client->socket = client_fd;
         client->ssl = ssl;
         client->is_authenticated = 0;
-        inet_ntop(AF_INET, &client_addr.sin_addr, client->ip_address, INET_ADDRSTRLEN);
+        if (!inet_ntop(AF_INET, &client_addr.sin_addr, client->ip_address, INET_ADDRSTRLEN))
+        {
+            fprintf(stderr, "[ERROR] inet_ntop failed.\n");
+            close(client_fd);
+            SSL_free(ssl);
+            free(client);
+            continue;
+        }
         client->port = ntohs(client_addr.sin_port);
 
         // Ajout du client à la liste
         pthread_mutex_lock(&clients_mutex);
+        int added = 0;
         for (int i = 0; i < MAX_CLIENTS; i++)
         {
             if (!clients[i])
             {
                 clients[i] = client;
+                added = 1;
                 break;
             }
         }
         pthread_mutex_unlock(&clients_mutex);
+        if (!added)
+        {
+            fprintf(stderr, "[ERROR] Max clients reached.\n");
+            close(client_fd);
+            SSL_free(ssl);
+            free(client);
+            continue;
+        }
 
         // Création du thread client
-        pthread_create(&thread_id, NULL, handle_client, (void *)client);
+        int thread_result = pthread_create(&thread_id, NULL, handle_client, (void *)client);
+        if (thread_result != 0)
+        {
+            fprintf(stderr, "[ERROR] pthread_create failed.\n");
+            pthread_mutex_lock(&clients_mutex);
+            for (int i = 0; i < MAX_CLIENTS; i++)
+            {
+                if (clients[i] == client)
+                {
+                    clients[i] = NULL;
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&clients_mutex);
+            close(client_fd);
+            SSL_free(ssl);
+            free(client);
+            continue;
+        }
         pthread_detach(thread_id);
+        fprintf(stderr, "[DEBUG] Client thread created and detached.\n");
     }
 
     // Nettoyage
+    // Free all client memory
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
+        if (clients[i])
+        {
+            close(clients[i]->socket);
+            SSL_free(clients[i]->ssl);
+            free(clients[i]);
+            clients[i] = NULL;
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+
     SSL_CTX_free(ssl_context);
     sqlite3_close(db);
     close(server_fd);
