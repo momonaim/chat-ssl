@@ -195,6 +195,18 @@ void handle_command(ClientInfo *client, char *command)
     if (!token)
         return;
 
+    // Shortcuts: /g = /group, /p = /private, /h = /help, /q = /quit
+    if (strcmp(token, "/g") == 0)
+        token = "/group";
+    else if (strcmp(token, "/p") == 0)
+        token = "/private";
+    else if (strcmp(token, "/h") == 0)
+        token = "/help";
+    else if (strcmp(token, "/q") == 0)
+        token = "/quit";
+    else if (strcmp(token, "/j") == 0)
+        token = "/join";
+
     if (strcmp(token, "/join") == 0)
     {
         token = strtok(NULL, " ");
@@ -210,7 +222,7 @@ void handle_command(ClientInfo *client, char *command)
         }
         send_to_client(client->ssl, buffer);
     }
-    else if (strcmp(token, "/quitgroup") == 0)
+    else if (strcmp(token, "/leave") == 0)
     {
         if (client->group[0] == '\0')
         {
@@ -349,15 +361,25 @@ void handle_command(ClientInfo *client, char *command)
     else if (strcmp(token, "/help") == 0)
     {
         snprintf(buffer, sizeof(buffer), "=== Commandes disponibles ===\n"
-                                         "/join [groupe] - Rejoindre un groupe\n"
-                                         "/quitgroup - Quitter le groupe\n"
-                                         "/group [message] - Envoyer un message au groupe\n"
+                                         "/join [groupe] ou /j [groupe] - Rejoindre un groupe\n"
+                                         "/leave - Quitter le groupe\n"
+                                         "/group [message] ou /g [message] - Envoyer un message au groupe\n"
                                          "/groups - Liste des groupes actifs\n"
-                                         "/private [user] [message] - Message privé\n"
+                                         "/private [user] [message] ou /p [user] [message] - Message privé\n"
                                          "/users - Liste des utilisateurs\n"
-                                         "/help - Afficher l'aide\n"
-                                         "/quit - Quitter\n");
+                                         "/help ou /h - Afficher l'aide\n"
+                                         "/quit ou /q - Quitter\n");
         send_to_client(client->ssl, buffer);
+    }
+    else if (strcmp(token, "/quit") == 0)
+    {
+        snprintf(buffer, sizeof(buffer), "SERVER: Déconnexion demandée. Au revoir !\n");
+        send_to_client(client->ssl, buffer);
+        SSL_shutdown(client->ssl);
+        close(client->socket);
+        SSL_free(client->ssl);
+        free(client);
+        pthread_exit(NULL);
     }
 }
 
