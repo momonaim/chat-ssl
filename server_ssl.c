@@ -413,12 +413,14 @@ void *handle_client(void *arg)
     }
     else
     {
-        sprintf(buffer, "Échec de l'authentification\n");
+        sprintf(buffer, "ERREUR: Échec de l'authentification. Connexion fermée.\n");
         send_to_client(client->ssl, buffer);
+        // Shutdown SSL connection before closing
+        SSL_shutdown(client->ssl);
         close(client->socket);
         SSL_free(client->ssl);
         free(client);
-        return NULL;
+        pthread_exit(NULL);
     }
 
     // Boucle principale de traitement des messages

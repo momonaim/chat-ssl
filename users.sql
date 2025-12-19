@@ -38,8 +38,8 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 -- Index pour améliorer les performances
-CREATE INDEX idx_messages_sender ON messages(sender_id);
-CREATE INDEX idx_messages_receiver ON messages(receiver_id);
-CREATE INDEX idx_messages_group ON messages(group_id);
-CREATE INDEX idx_group_members_user ON group_members(user_id);
-CREATE INDEX idx_group_members_group ON group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id);
+CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
