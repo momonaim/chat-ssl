@@ -49,6 +49,12 @@ make
 make certificates
 ```
 
+## Firewall
+
+```sh
+make firewall
+```
+
 ## Lancement du serveur
 
 ```sh
