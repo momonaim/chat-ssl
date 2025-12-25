@@ -21,6 +21,10 @@ test: test_chat.sh server client
 clean:
 	rm -f server client *.o
 
+firewall:
+	firewall-cmd --permanent --add-port=8888/tcp
+	firewall-cmd --reload
+
 clean-db:
 	rm -f chat_app.db
 
