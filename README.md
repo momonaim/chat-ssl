@@ -17,7 +17,7 @@ Ce projet est une application de chat sécurisée utilisant SSL pour la communic
 
 ## Demo
 
-[Demo](<CHAT_SLL_DEMO_2025-12-26 19-36-09.mkv>)
+https://github.com/user-attachments/assets/01ab2e71-fa64-411b-b30b-d43fc02f0f42
 
 ## Fichiers principaux
 
