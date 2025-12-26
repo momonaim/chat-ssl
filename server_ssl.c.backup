@@ -117,161 +117,8 @@ int init_database()
         }
         fclose(sql_file);
     }
-    // Create groups and group_members tables if not exist
-    char *err_msg = 0;
-    const char *groups_sql = "CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE);";
-    rc = sqlite3_exec(db, groups_sql, 0, 0, &err_msg);
-    if (rc != SQLITE_OK)
-    {
-        fprintf(stderr, "SQL error (groups): %s\n", err_msg);
-        sqlite3_free(err_msg);
-    }
-    const char *members_sql = "CREATE TABLE IF NOT EXISTS group_members (group_id INTEGER, user_id INTEGER, UNIQUE(group_id, user_id));";
-    rc = sqlite3_exec(db, members_sql, 0, 0, &err_msg);
-    if (rc != SQLITE_OK)
-    {
-        fprintf(stderr, "SQL error (group_members): %s\n", err_msg);
-        sqlite3_free(err_msg);
-    }
-
-    // Create messages table
-    const char *messages_sql = "CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT, receiver TEXT, group_name TEXT, message TEXT, type INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);";
-    rc = sqlite3_exec(db, messages_sql, 0, 0, &err_msg);
-    if (rc != SQLITE_OK)
-    {
-        fprintf(stderr, "SQL error (messages): %s\n", err_msg);
-        sqlite3_free(err_msg);
-    }
 
     return 0;
-}
-
-// Helper: Create group if not exists, return group id
-int get_or_create_group(const char *group_name)
-{
-    sqlite3_stmt *stmt;
-    int rc = sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO groups (name) VALUES (?);", -1, &stmt, 0);
-    if (rc == SQLITE_OK)
-    {
-        sqlite3_bind_text(stmt, 1, group_name, -1, SQLITE_STATIC);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
-    int group_id = -1;
-    rc = sqlite3_prepare_v2(db, "SELECT id FROM groups WHERE name = ?;", -1, &stmt, 0);
-    if (rc == SQLITE_OK)
-    {
-        sqlite3_bind_text(stmt, 1, group_name, -1, SQLITE_STATIC);
-        if (sqlite3_step(stmt) == SQLITE_ROW)
-        {
-            group_id = sqlite3_column_int(stmt, 0);
-        }
-        sqlite3_finalize(stmt);
-    }
-    return group_id;
-}
-
-// Helper: Get user id by username
-int get_user_id(const char *username)
-{
-    sqlite3_stmt *stmt;
-    int user_id = -1;
-    int rc = sqlite3_prepare_v2(db, "SELECT id FROM users WHERE username = ?;", -1, &stmt, 0);
-    if (rc == SQLITE_OK)
-    {
-        sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
-        if (sqlite3_step(stmt) == SQLITE_ROW)
-        {
-            user_id = sqlite3_column_int(stmt, 0);
-        }
-        sqlite3_finalize(stmt);
-    }
-    return user_id;
-}
-
-// Helper: Add user to group
-void add_user_to_group(int group_id, int user_id)
-{
-    sqlite3_stmt *stmt;
-    int rc = sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?);", -1, &stmt, 0);
-    if (rc == SQLITE_OK)
-    {
-        sqlite3_bind_int(stmt, 1, group_id);
-        sqlite3_bind_int(stmt, 2, user_id);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
-}
-
-// Helper: Remove user from group
-void remove_user_from_group(int group_id, int user_id)
-{
-    sqlite3_stmt *stmt;
-    int rc = sqlite3_prepare_v2(db, "DELETE FROM group_members WHERE group_id = ? AND user_id = ?;", -1, &stmt, 0);
-    if (rc == SQLITE_OK)
-    {
-        sqlite3_bind_int(stmt, 1, group_id);
-        sqlite3_bind_int(stmt, 2, user_id);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
-}
-
-// Helper: List all groups
-void list_groups_sqlite(char *buffer, size_t bufsize)
-{
-    sqlite3_stmt *stmt;
-    int rc = sqlite3_prepare_v2(db, "SELECT name FROM groups;", -1, &stmt, 0);
-    size_t pos = 0;
-    int n = snprintf(buffer + pos, bufsize - pos, "=== Groupes actifs ===\n");
-    if (n < 0 || (size_t)n >= bufsize - pos)
-        n = (int)(bufsize - pos - 1);
-    pos += n;
-    if (rc == SQLITE_OK)
-    {
-        while (sqlite3_step(stmt) == SQLITE_ROW)
-        {
-            const char *name = (const char *)sqlite3_column_text(stmt, 0);
-            n = snprintf(buffer + pos, bufsize - pos, "- %s\n", name);
-            if (n < 0 || (size_t)n >= bufsize - pos)
-                break;
-            pos += n;
-        }
-        sqlite3_finalize(stmt);
-    }
-    buffer[bufsize - 1] = '\0';
-}
-
-// Helper: Store message in SQLite
-void store_message(const char *sender_username, const char *receiver_username, const char *group_name, const char *message, int type)
-{
-    // Map type int to string
-    const char *type_str = (type == 0) ? "private" : (type == 1) ? "group"
-                                                                 : "server";
-    int sender_id = sender_username ? get_user_id(sender_username) : 0;
-    int receiver_id = receiver_username ? get_user_id(receiver_username) : 0;
-    int group_id = group_name ? get_or_create_group(group_name) : 0;
-    sqlite3_stmt *stmt;
-    int rc = sqlite3_prepare_v2(db, "INSERT INTO messages (sender_id, receiver_id, group_id, message, message_type) VALUES (?, ?, ?, ?, ?);", -1, &stmt, 0);
-    if (rc == SQLITE_OK)
-    {
-        if (sender_id > 0)
-            sqlite3_bind_int(stmt, 1, sender_id);
-        else
-            sqlite3_bind_null(stmt, 1);
-        if (receiver_id > 0)
-            sqlite3_bind_int(stmt, 2, receiver_id);
-        else
-            sqlite3_bind_null(stmt, 2);
-        if (group_id > 0)
-            sqlite3_bind_int(stmt, 3, group_id);
-        else
-            sqlite3_bind_null(stmt, 3);
-        sqlite3_bind_text(stmt, 4, message ? message : "", -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 5, type_str, -1, SQLITE_STATIC);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
 }
 
 // Authentification de l'utilisateur
@@ -369,19 +216,9 @@ void handle_command(ClientInfo *client, char *command)
         }
         else
         {
-            int group_id = get_or_create_group(token);
-            int user_id = get_user_id(client->username);
-            if (group_id > 0 && user_id > 0)
-            {
-                add_user_to_group(group_id, user_id);
-                strncpy(client->group, token, sizeof(client->group) - 1);
-                client->group[sizeof(client->group) - 1] = '\0';
-                snprintf(buffer, sizeof(buffer), "SERVER: Vous avez rejoint le groupe %s\n", client->group);
-            }
-            else
-            {
-                snprintf(buffer, sizeof(buffer), "SERVER: Erreur lors de la jointure du groupe.\n");
-            }
+            strncpy(client->group, token, sizeof(client->group) - 1);
+            client->group[sizeof(client->group) - 1] = '\0';
+            snprintf(buffer, sizeof(buffer), "SERVER: Vous avez rejoint le groupe %s\n", client->group);
         }
         send_to_client(client->ssl, buffer);
     }
@@ -393,12 +230,6 @@ void handle_command(ClientInfo *client, char *command)
         }
         else
         {
-            int group_id = get_or_create_group(client->group);
-            int user_id = get_user_id(client->username);
-            if (group_id > 0 && user_id > 0)
-            {
-                remove_user_from_group(group_id, user_id);
-            }
             client->group[0] = '\0';
             snprintf(buffer, sizeof(buffer), "SERVER: Vous avez quitté le groupe.\n");
         }
@@ -419,9 +250,9 @@ void handle_command(ClientInfo *client, char *command)
             send_to_client(client->ssl, buffer);
             return;
         }
-        store_message(client->username, NULL, client->group, message, 1); // type 1 = group
         char group_msg[BUFFER_SIZE + 100];
         snprintf(group_msg, sizeof(group_msg), "[GROUPE %s] %s: %s\n", client->group, client->username, message);
+        // Broadcast only to group members
         pthread_mutex_lock(&clients_mutex);
         for (int i = 0; i < MAX_CLIENTS; i++)
         {
@@ -442,8 +273,8 @@ void handle_command(ClientInfo *client, char *command)
             send_to_client(client->ssl, buffer);
             return;
         }
-        store_message(client->username, target_user, NULL, message, 0); // type 0 = private
         snprintf(buffer, sizeof(buffer), "PRIVATE from %s: %s\n", client->username, message);
+
         pthread_mutex_lock(&clients_mutex);
         for (int i = 0; i < MAX_CLIENTS; i++)
         {
@@ -484,7 +315,47 @@ void handle_command(ClientInfo *client, char *command)
     }
     else if (strcmp(token, "/groups") == 0)
     {
-        list_groups_sqlite(buffer, sizeof(buffer));
+        char groups[MAX_CLIENTS][50];
+        int group_count = 0;
+        size_t pos = 0;
+        int n;
+        n = snprintf(buffer + pos, sizeof(buffer) - pos, "=== Groupes actifs ===\n");
+        if (n < 0 || (size_t)n >= sizeof(buffer) - pos)
+            n = (int)(sizeof(buffer) - pos - 1);
+        pos += n;
+        pthread_mutex_lock(&clients_mutex);
+        for (int i = 0; i < MAX_CLIENTS; i++)
+        {
+            if (clients[i] && clients[i]->is_authenticated && clients[i]->group[0] != '\0')
+            {
+                int exists = 0;
+                for (int j = 0; j < group_count; j++)
+                {
+                    if (strcmp(groups[j], clients[i]->group) == 0)
+                    {
+                        exists = 1;
+                        break;
+                    }
+                }
+                if (!exists && group_count < MAX_CLIENTS)
+                {
+                    strncpy(groups[group_count], clients[i]->group, sizeof(groups[group_count]) - 1);
+                    groups[group_count][sizeof(groups[group_count]) - 1] = '\0';
+                    group_count++;
+                }
+            }
+        }
+        pthread_mutex_unlock(&clients_mutex);
+        for (int i = 0; i < group_count; i++)
+        {
+            n = snprintf(buffer + pos, sizeof(buffer) - pos, "- %s\n", groups[i]);
+            if (n < 0 || (size_t)n >= sizeof(buffer) - pos)
+            {
+                break;
+            }
+            pos += n;
+        }
+        buffer[sizeof(buffer) - 1] = '\0';
         send_to_client(client->ssl, buffer);
     }
     else if (strcmp(token, "/help") == 0)
@@ -594,13 +465,11 @@ void *handle_client(void *arg)
             if (client->group[0] == '\0')
             {
                 snprintf(broadcast_msg, sizeof(broadcast_msg), "%s: %s\n", client->username, buffer);
-                store_message(client->username, NULL, NULL, buffer, 2); // type 2 = server/broadcast
                 broadcast_message(broadcast_msg, -1);
             }
             else
             {
                 snprintf(broadcast_msg, sizeof(broadcast_msg), "[GROUPE %s] %s: %s\n", client->group, client->username, buffer);
-                store_message(client->username, NULL, client->group, buffer, 1); // type 1 = group
                 pthread_mutex_lock(&clients_mutex);
                 for (int i = 0; i < MAX_CLIENTS; i++)
                 {
