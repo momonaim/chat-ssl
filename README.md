@@ -15,6 +15,10 @@ Ce projet est une application de chat sécurisée utilisant SSL pour la communic
   - `/h` : afficher l'aide
   - `/q` : quitter
 
+## Demo
+
+[Demo](<CHAT_SLL_DEMO_2025-12-26 19-36-09.mkv>)
+
 ## Fichiers principaux
 
 - `server_ssl.c` : serveur de chat SSL
@@ -25,6 +29,7 @@ Ce projet est une application de chat sécurisée utilisant SSL pour la communic
 - `test_chat.sh` : script de test
 
 ## Installation des dépendances sur CentOS
+
 ```sh
 # CentOS 7/8
 sudo yum update -y
