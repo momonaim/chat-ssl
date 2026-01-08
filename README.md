@@ -2,6 +2,12 @@
 
 Ce projet est une application de chat sécurisée utilisant SSL pour la communication entre clients et serveur.
 
+## Architecture
+
+L'architecture du projet est basée sur un modèle client-serveur. Le serveur gère les connexions des clients, l'authentification, et la transmission des messages. Les clients se connectent au serveur via une connexion SSL sécurisée.
+
+![Architecture](img.png)
+
 ## Fonctionnalités
 
 - Authentification des utilisateurs

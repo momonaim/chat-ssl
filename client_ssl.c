@@ -1,4 +1,3 @@
-// client_ssl.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -124,7 +123,7 @@ int main(int argc, char *argv[])
     // Boucle d'envoi des messages
     while (1)
     {
-        if (!fgets(buffer, BUFFER_SIZE - 2, stdin)) // leave space for newline and null
+        if (!fgets(buffer, BUFFER_SIZE - 2, stdin))
             break;
         buffer[strcspn(buffer, "\n")] = 0;
 

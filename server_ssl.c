@@ -1,4 +1,3 @@
-// server_ssl.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,17 +20,8 @@ typedef struct
     char ip_address[INET_ADDRSTRLEN];
     int port;
     int is_authenticated;
-    char group[50]; // Added for group chat
-} ClientInfo;
-
-typedef struct
-{
-    int type; // 0: private, 1: group, 2: server
-    char sender[50];
-    char receiver[50];
     char group[50];
-    char message[BUFFER_SIZE];
-} ChatMessage;
+} ClientInfo;
 
 ClientInfo *clients[MAX_CLIENTS];
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -472,7 +462,7 @@ void handle_command(ClientInfo *client, char *command)
                              clients[i]->username, clients[i]->ip_address, clients[i]->port);
                 if (n < 0 || (size_t)n >= sizeof(buffer) - pos)
                 {
-                    // Buffer full, stop adding more users
+                    // Buffer full, y3ni no more users!!
                     break;
                 }
                 pos += n;
@@ -535,7 +525,7 @@ void *handle_client(void *arg)
     buffer[strcspn(buffer, "\n")] = 0;
     strncpy(client->username, buffer, sizeof(client->username) - 1);
     client->username[sizeof(client->username) - 1] = '\0';
-    client->group[0] = '\0'; // No group by default
+    client->group[0] = '\0';
 
     sprintf(buffer, "Entrez votre mot de passe: ");
     send_to_client(client->ssl, buffer);
