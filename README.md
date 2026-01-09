@@ -78,6 +78,17 @@ make firewall
 ./client_ssl
 ```
 
+## Alternative: Use ssldump instead of Wireshark:
+
+```bash
+# Install ssldump
+sudo yum install ssldump  # or sudo apt-get install ssldump
+
+# Capture and decode TLS
+sudo ssldump -i lo -d port 8888
+
+```
+
 ## Dépendances
 
 - OpenSSL
